@@ -14,7 +14,11 @@ import {
   resolveFieldKeyType,
   getErrorMessageForTypedFieldAndValue,
 } from './typedListHelpers';
-import { ListItemTopBar, ObjectWidgetTopBar, colors, lengths } from 'netlify-cms-ui-default';
+import { ListItemTopBar, ObjectWidgetTopBar, colors, lengths, Icon } from 'netlify-cms-ui-default';
+import { useDebouncedCallback } from 'use-debounce'
+
+
+import { HintContextProvider, useGetInsertionIndex, useRegisterRef } from './hintHooks'
 
 function valueToString(value) {
   return value ? value.join(',').replace(/,([^\s]|$)/g, ', $1') : '';
@@ -59,10 +63,61 @@ const styles = {
   listControlItemCollapsed: css`
     padding-bottom: 0;
   `,
+  inserterItem: css`
+    position: absolute;
+    // margin-top: 18px;
+    padding: 6px 12px;
+    // width: 100%;
+    transform: translate(0, -25%);
+    right: 60px;
+    z-index: 1000;
+    background: #dfdfe3;
+    text-align: center;
+    border-radius: 5px;
+    box-shadow: 2px 2px 6px 0px rgba(0,0,0,0.3);
+    border: 1px solid #798291;
+    display: flex;
+    align-items: center;
+    border: 0;
+    color: #798291;
+    font-size: 0.8rem;
+    font-weight: bolder;
+    cursor: pointer;
+  `
 };
 
+
+const ItemWrapper = ({ children, index }) => {
+  const bboxTrackRef = useRegisterRef(index)
+
+  return (
+    <div ref={bboxTrackRef}>{children}</div>
+  )
+}
+ 
 const SortableList = SortableContainer(({ items, renderItem }) => {
-  return <div>{items.map(renderItem)}</div>;
+  const getInstertionIndex = useGetInsertionIndex()
+  const [insertIndex, setState] = React.useState(null)
+
+  const [onMouseMove] = useDebouncedCallback((x, y) => {
+    setState(getInstertionIndex(x, y))
+  }, 5)
+
+  let mappedItems = items.map(renderItem)
+
+  if (insertIndex != null) {
+    mappedItems = [
+      ...mappedItems.slice(0, insertIndex), 
+      <button css={styles.inserterItem} key={'inserter'}><Icon type="add"/>Insert item</button>, 
+      ...mappedItems.slice(insertIndex)
+    ]
+  }
+
+  return (
+    <div onMouseMove={(e) => onMouseMove(e.clientX, e.clientY)} onMouseLeave={() => setState(null)}>
+      {mappedItems}
+    </div>
+  );
 });
 
 const valueTypes = {
@@ -354,36 +409,39 @@ export default class ListControl extends React.Component {
         index={index}
         key={`item-${index}`}
       >
-        <StyledListItemTopBar
-          collapsed={collapsed}
-          onCollapseToggle={partial(this.handleItemCollapseToggle, index)}
-          onRemove={partial(this.handleRemove, index)}
-          dragHandleHOC={SortableHandle}
-        />
-        <NestedObjectLabel collapsed={collapsed}>{this.objectLabel(item)}</NestedObjectLabel>
-        <ClassNames>
-          {({ css, cx }) => (
-            <ObjectControl
-              classNameWrapper={cx(classNameWrapper, {
-                [css`
-                  ${styleStrings.collapsedObjectControl};
-                `]: collapsed,
-              })}
-              value={item}
-              field={field}
-              onChangeObject={this.handleChangeFor(index)}
-              editorControl={editorControl}
-              resolveWidget={resolveWidget}
-              metadata={metadata}
-              forList
-              onValidateObject={onValidateObject}
-              clearFieldErrors={clearFieldErrors}
-              fieldsErrors={fieldsErrors}
-              ref={this.processControlRef}
-              controlRef={controlRef}
-            />
-          )}
-        </ClassNames>
+        <ItemWrapper index={index}>
+          <StyledListItemTopBar
+            collapsed={collapsed}
+            onCollapseToggle={partial(this.handleItemCollapseToggle, index)}
+            onRemove={partial(this.handleRemove, index)}
+            dragHandleHOC={SortableHandle}
+          />
+          <NestedObjectLabel collapsed={collapsed}>{this.objectLabel(item)}</NestedObjectLabel>
+          <ClassNames>
+            {({ css, cx }) => (
+              <ObjectControl
+                classNameWrapper={cx(classNameWrapper, {
+                  [css`
+                    ${styleStrings.collapsedObjectControl};
+                  `]: collapsed,
+                })}
+                value={item}
+                field={field}
+                onChangeObject={this.handleChangeFor(index)}
+                editorControl={editorControl}
+                resolveWidget={resolveWidget}
+                metadata={metadata}
+                forList
+                onValidateObject={onValidateObject}
+                clearFieldErrors={clearFieldErrors}
+                fieldsErrors={fieldsErrors}
+                ref={this.processControlRef}
+                controlRef={controlRef}
+              />
+            )}
+          </ClassNames>
+        </ItemWrapper>
+
       </SortableListItem>
     );
   };
@@ -416,39 +474,41 @@ export default class ListControl extends React.Component {
     const label = field.get('label', field.get('name'));
     const labelSingular = field.get('label_singular') || field.get('label', field.get('name'));
     const listLabel = items.size === 1 ? labelSingular.toLowerCase() : label.toLowerCase();
-
+    
     return (
-      <ClassNames>
-        {({ cx, css }) => (
-          <div
-            id={forID}
-            className={cx(
-              classNameWrapper,
-              css`
-                ${styleStrings.objectWidgetTopBarContainer}
-              `,
-            )}
-          >
-            <ObjectWidgetTopBar
-              allowAdd={field.get('allow_add', true)}
-              onAdd={this.handleAdd}
-              types={field.get(TYPES_KEY, null)}
-              onAddType={type => this.handleAddType(type, resolveFieldKeyType(field))}
-              heading={`${items.size} ${listLabel}`}
-              label={labelSingular.toLowerCase()}
-              onCollapseToggle={this.handleCollapseAllToggle}
-              collapsed={itemsCollapsed.every(val => val === true)}
-            />
-            <SortableList
-              items={items}
-              renderItem={this.renderItem}
-              onSortEnd={this.onSortEnd}
-              useDragHandle
-              lockAxis="y"
-            />
-          </div>
-        )}
-      </ClassNames>
+
+        <ClassNames>
+          {({ cx, css }) => (
+            <div
+              id={forID}
+              className={cx(
+                classNameWrapper,
+                css`
+                  ${styleStrings.objectWidgetTopBarContainer}
+                `,
+              )}
+            >
+              <ObjectWidgetTopBar
+                allowAdd={field.get('allow_add', true)}
+                onAdd={this.handleAdd}
+                types={field.get(TYPES_KEY, null)}
+                onAddType={type => this.handleAddType(type, resolveFieldKeyType(field))}
+                heading={`${items.size} ${listLabel}`}
+                label={labelSingular.toLowerCase()}
+                onCollapseToggle={this.handleCollapseAllToggle}
+                collapsed={itemsCollapsed.every(val => val === true)}
+              />
+              <SortableList
+                items={items}
+                renderItem={this.renderItem}
+                onSortEnd={this.onSortEnd}
+                useDragHandle
+                lockAxis="y"
+              />
+            </div>
+          )}
+        </ClassNames>
+
     );
   }
 
@@ -471,9 +531,9 @@ export default class ListControl extends React.Component {
 
   render() {
     if (this.getValueType() !== null) {
-      return this.renderListControl();
+      return <HintContextProvider>{this.renderListControl()}</HintContextProvider>;
     } else {
-      return this.renderInput();
+      return <HintContextProvider>{this.renderInput()}</HintContextProvider>;
     }
   }
 }
